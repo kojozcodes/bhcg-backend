@@ -355,18 +355,16 @@ def parse_diagnostic_report(text, filename=""):
     
     # Model - capture with parentheses and special characters
     model_patterns = [
-        r'Model[:\s]+([A-Za-z0-9\s\(\)\-]+?)\s+Year:',  # Pattern 1: "Model: Niro (DE EV) Year:"
-        r'Model[:\s]+([A-Za-z0-9\s\(\)\-]+?)\n',        # Pattern 2: "Model: Niro (DE EV)\n"
-        r'Model[:\s]*:?\s*([^\n]+?)(?:\s+Year|\n)',     # Pattern 3: More flexible
-        r'Vehicle\s+Model[:\s]+([^\n]+)',               # Pattern 4: "Vehicle Model:"
+        r'Model[:\s]+([A-Za-z0-9\s\(\)\-]+?)\s+Year:',  # Pattern 1
+        r'Model[:\s]+([A-Za-z0-9\s\(\)\-]+?)\n',        # Pattern 2
+        r'Model[:\s]*:?\s*([^\n]+?)(?:\s+Year|\n)',     # Pattern 3
+        r'Vehicle\s+Model[:\s]+([^\n]+)',               # Pattern 4
     ]
     for i, pattern in enumerate(model_patterns, 1):
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             model_text = match.group(1).strip()
-            # Clean up extra whitespace
             model_text = re.sub(r'\s+', ' ', model_text)
-            # Remove any trailing punctuation or junk
             model_text = re.sub(r'[:\s]+$', '', model_text)
             if model_text and len(model_text) > 1:
                 data['model'] = model_text
@@ -385,10 +383,10 @@ def parse_diagnostic_report(text, filename=""):
             print(f"✅ Year: {data['year']}")
             break
     
-    # Mileage - multiple formats
+    # Mileage
     mileage_patterns = [
         r'Distance\s+Traveled[:\s]+([\d,.\s]+)\s*Miles',
-        r'Distance\s+Traveled[:\s]+([\d,.\s]+)Miles',  # No space before "Miles"
+        r'Distance\s+Traveled[:\s]+([\d,.\s]+)Miles',
         r'Mileage[:\s]+([\d,.\s]+)\s*(?:miles|km)?',
         r'Odometer[:\s]+([\d,.\s]+)\s*(?:miles|km)?',
         r'Total\s+Distance[:\s]+([\d,.\s]+)\s*Miles',
@@ -399,14 +397,13 @@ def parse_diagnostic_report(text, filename=""):
             miles_str = match.group(1).replace(',', '').replace(' ', '').strip()
             try:
                 miles = float(miles_str)
-                # Format with comma separators
                 data['mileage'] = f"{int(miles):,} miles"
                 print(f"✅ Mileage (pattern {i}): {data['mileage']}")
                 break
             except ValueError:
                 continue
     
-    # State of Charge (SOC) - this is what we use for state_of_health
+    # State of Charge (SOC)
     soc_patterns = [
         r'Display\s+state\s+of\s+charge\s*\(?\s*SOC\s*\)?[:\s]*(\d+)\s*%',
         r'State\s+of\s+Charge[:\s]*(\d+)\s*%',
@@ -421,7 +418,7 @@ def parse_diagnostic_report(text, filename=""):
                 print(f"✅ SOC (used as State of Health): {data['soc']}%")
                 break
     
-    # Test Date - multiple date formats
+    # Test Date
     date_patterns = [
         r'Date\s+Created[:\s]*(\d{4})[/-](\d{2})[/-](\d{2})',
         r'Test\s+Date[:\s]*(\d{4})[/-](\d{2})[/-](\d{2})',
@@ -436,11 +433,11 @@ def parse_diagnostic_report(text, filename=""):
             print(f"✅ Test Date: {data['test_date']}")
             break
     
-    # Battery Capacity - capture as-is (don't convert)
+    # Battery Capacity
     battery_patterns = [
         r'Battery\s+Capacity[:\s]*([^\n]+?)(?:\n|$)',
         r'Capacity[:\s]*([^\n]+?)(?:\n|$)',
-        r'Engine[:\s]+([^\s\n]+(?:/[^\s\n]+)?)',  # For diagnostic reports
+        r'Engine[:\s]+([^\s\n]+(?:/[^\s\n]+)?)',
         r'Power[:\s]+([^\n]+?)(?:kW|KW)',
         r'Battery\s+Size[:\s]*([^\n]+)',
     ]
@@ -448,7 +445,6 @@ def parse_diagnostic_report(text, filename=""):
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             capacity = match.group(1).strip()
-            # Clean up - remove extra whitespace
             capacity = ' '.join(capacity.split())
             if capacity and len(capacity) > 0:
                 data['battery_capacity'] = capacity
@@ -460,7 +456,7 @@ def parse_diagnostic_report(text, filename=""):
 
 
 def extract_data_from_pdf(pdf_path):
-    """Extract vehicle and battery data from PDF diagnostic report - Universal for all brands"""
+    """Extract vehicle and battery data from PDF diagnostic report"""
     try:
         filename = os.path.basename(pdf_path)
         
@@ -485,32 +481,27 @@ def extract_data_from_pdf(pdf_path):
         # Convert to expected output format
         result = {}
         
-        # Test date - convert from DD/MM/YYYY to YYYY-MM-DD for HTML date input
+        # Test date - convert from DD/MM/YYYY to YYYY-MM-DD
         if parsed_data.get('test_date'):
             parts = parsed_data['test_date'].split('/')
             if len(parts) == 3:
                 result['test_date'] = f"{parts[2]}-{parts[1]}-{parts[0]}"
         
-        # Make and Model
         if parsed_data.get('make'):
             result['make'] = parsed_data['make']
         
         if parsed_data.get('model'):
             result['model'] = parsed_data['model']
         
-        # VIN
         if parsed_data.get('vin'):
             result['vin'] = parsed_data['vin']
         
-        # Mileage (already formatted)
         if parsed_data.get('mileage'):
             result['mileage'] = parsed_data['mileage']
         
-        # Battery Capacity - return as-is, no conversion
         if parsed_data.get('battery_capacity'):
             result['battery_capacity'] = parsed_data['battery_capacity']
         
-        # State of Health - use SOC (Display state of charge)
         if parsed_data.get('soc'):
             result['state_of_health'] = parsed_data['soc']
         
@@ -522,119 +513,93 @@ def extract_data_from_pdf(pdf_path):
         
     except Exception as e:
         print(f"❌ Error extracting PDF data: {e}")
-        import traceback
         print(traceback.format_exc())
         return None
 
 
 def generate_certificate_pdf(data, output_path, qr_url=None):
-    """Generate battery health certificate PDF - Using main.py's perfect implementation"""
+    """Generate battery health certificate PDF"""
     
     fonts_loaded = register_fonts()
+    font_name = 'CanvaSans' if fonts_loaded else 'Helvetica'
     font_bold = 'CanvaSans-Bold' if fonts_loaded else 'Helvetica-Bold'
-    font_regular = 'CanvaSans' if fonts_loaded else 'Helvetica'
-    
-    # Ensure both fonts are available
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    if font_bold == "CanvaSans-Bold":
-        canva_regular_ttf = os.path.join(script_dir, "canva-sans-regular.ttf")
-        if os.path.exists(canva_regular_ttf):
-            try:
-                pdfmetrics.registerFont(TTFont("CanvaSans", canva_regular_ttf))
-                font_regular = "CanvaSans"
-            except:
-                font_regular = font_bold
-        else:
-            font_regular = font_bold
-    else:
-        font_regular = font_bold.replace("-Bold", "")
-    
-    # Verify fonts are registered
-    available_fonts = pdfmetrics.getRegisteredFontNames()
-    if font_regular not in available_fonts:
-        font_regular = font_bold
-    if font_bold not in available_fonts:
-        font_bold = "Helvetica-Bold"
-        font_regular = "Helvetica"
     
     c = canvas.Canvas(output_path, pagesize=A4)
     width, height = A4
     
     # Draw background template
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     template_path = os.path.join(script_dir, 'certificate_bg_2.png')
+    
     if os.path.exists(template_path):
-        c.drawImage(template_path, 0, 0, width=width, height=height, mask='auto')
+        c.drawImage(template_path, 0, 0, width=width, height=height, 
+                   preserveAspectRatio=True, mask='auto')
+    
+    c.setFont(font_name, 10)
+    
+    # Header section (dark blue bar)
+    c.setFillColorRGB(1, 1, 1)  # White text
+    c.setFont(font_name, 11)
+    
+    if data.get('test_date'):
+        c.drawString(160, 760, data['test_date'])
+    
+    if data.get('tested_by'):
+        c.drawString(370, 760, data['tested_by'])
+    
+    if data.get('state_of_health'):
+        status = get_battery_status(data['state_of_health'])
+        c.drawString(730, 760, status)
+    
+    # Vehicle Information
+    c.setFillColorRGB(0.12, 0.14, 0.16)
+    c.setFont(font_name, 12)
+    
+    if data.get('make'):
+        c.drawString(160, 580, data['make'])
+    
+    if data.get('registration'):
+        c.drawString(510, 580, data['registration'])
+    
+    if data.get('model'):
+        c.drawString(160, 540, data['model'])
+    
+    if data.get('first_registered'):
+        c.drawString(510, 540, data['first_registered'])
+    
+    if data.get('vin'):
+        c.drawString(160, 500, data['vin'])
+    
+    if data.get('mileage'):
+        c.drawString(510, 500, data['mileage'])
+    
+    # Battery Health
+    c.setFont(font_bold, 14)
+    
+    if data.get('battery_capacity'):
+        capacity_text = f"{data['battery_capacity']} kWh"
+        c.drawString(180, 370, capacity_text)
+    
+    if data.get('state_of_health'):
+        soh_text = f"{data['state_of_health']}%"
+        c.setFont(font_bold, 18)
+        c.drawString(180, 290, soh_text)
     
     # QR Code
     if qr_url:
         qr_img = generate_qr_code(qr_url)
         if qr_img:
-            temp_qr = "temp_qr.png"
-            with open(temp_qr, "wb") as f:
+            qr_temp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            with open(qr_temp.name, 'wb') as f:
                 f.write(qr_img.read())
-            c.drawImage(temp_qr, QR_X, QR_Y, width=QR_SIZE, height=QR_SIZE, mask="auto")
-            if os.path.exists(temp_qr):
-                os.remove(temp_qr)
-    
-    # Header section - Test Date, Tested By, Status
-    c.setFont(font_bold, 15)
-    c.setFillColorRGB(0, 0, 0)
-    c.drawString(90, height - 216, data.get('test_date', ''))
-    
-    c.setFont(font_bold, 15)
-    c.setFillColorRGB(1, 1, 1)  # White text for Tested By
-    c.drawString(270, height - 216, data.get('tested_by', ''))
-    
-    status = get_battery_status(data.get('state_of_health', 90))
-    c.setFont(font_bold, 15)
-    c.setFillColorRGB(0, 0, 0)
-    c.drawString(480, height - 215, status)
-    
-    # Vehicle Information section
-    c.setFont(font_bold, 15)
-    c.drawString(85, height - 354, data.get('make', ''))
-    c.drawString(405, height - 354, data.get('registration', ''))
-    c.drawString(85, height - 392, data.get('model', ''))
-    c.drawString(405, height - 392, data.get('first_registered', ''))
-    c.drawString(85, height - 431, data.get('vin', ''))
-    c.drawString(405, height - 432, data.get('mileage', ''))
-    
-    # Battery Capacity
-    c.setFont(font_bold, 22)
-    battery_text = data.get('battery_capacity', '')
-    c.drawString(180, height - 585, battery_text)
-    
-    # State of Health Progress Bar
-    bar_x, bar_y, bar_width, bar_height = 180, height - 675, 300, 30
-    
-    try:
-        percent_value = int(str(data.get('state_of_health', 90)).replace("%", "").strip())
-    except ValueError:
-        percent_value = 90
-    
-    # Draw background bar (gray)
-    c.setFillColorRGB(0.9, 0.9, 0.9)
-    c.roundRect(bar_x, bar_y, bar_width, bar_height, radius=5, fill=1, stroke=1)
-    
-    # Draw filled bar with color based on health
-    if percent_value > 85:
-        c.setFillColorRGB(0, 0.7, 0)  # Green
-    elif percent_value >= 65:
-        c.setFillColorRGB(1, 0.65, 0)  # Orange
-    else:
-        c.setFillColorRGB(0.9, 0, 0)  # Red
-    
-    fill_width = (bar_width * percent_value) / 100
-    c.roundRect(bar_x, bar_y, fill_width, bar_height, radius=5, fill=1, stroke=0)
-    
-    # Draw percentage box (white box with black text)
-    c.setFillColorRGB(1, 1, 1)  # White background
-    c.roundRect(bar_x + bar_width + 5, bar_y, 80, bar_height, radius=5, fill=1, stroke=1)
-    
-    # Draw percentage text
-    c.setFont(font_bold, 20)
-    c.setFillColorRGB(0, 0, 0)  # Black text
-    c.drawCentredString(bar_x - 12.5 + bar_width + 60, bar_y + 8, f"{percent_value}%")
+            
+            c.drawImage(qr_temp.name, QR_X, QR_Y, width=QR_SIZE, height=QR_SIZE,
+                       preserveAspectRatio=True, mask='auto')
+            
+            try:
+                os.unlink(qr_temp.name)
+            except:
+                pass
     
     c.save()
     return output_path
@@ -774,8 +739,7 @@ def generate_certificate():
         
         cert_id = str(uuid.uuid4())
         registration = data.get('registration', 'UNKNOWN').strip().upper().replace(' ', '')
-        date_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"Certificate_{registration}_{date_str}.pdf"
+        filename = f"{registration}.pdf"
         output_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
         # Generate without QR first
@@ -797,10 +761,14 @@ def generate_certificate():
         else:
             os.rename(temp_pdf, output_path)
         
-        # Send email if requested
-        email_sent = False
+        # Email logic: ALWAYS send to BCC, optionally send to recipient
+        email_sent_to_bcc = False
+        email_sent_to_recipient = False
+        
         recipient_email = data.get('recipient_email', '').strip()
-        if recipient_email and os.getenv('EMAIL_SENDER'):
+        bcc_email = os.getenv('EMAIL_BCC', '').strip()
+        
+        if os.getenv('EMAIL_SENDER'):
             email_body = f"""
             <p>Please find attached your Battery Health Certificate.</p>
             <p><strong>Vehicle:</strong> {data.get('make')} {data.get('model')}<br>
@@ -811,18 +779,31 @@ def generate_certificate():
             if cloudinary_url:
                 email_body += f'<p><a href="{cloudinary_url}" style="color: #52C41A; text-decoration: none;">📄 View Certificate Online</a></p>'
             
-            email_sent = send_email(
-                recipient_email,
-                f"Battery Health Certificate - {data.get('registration')}",
-                email_body,
-                output_path
-            )
+            # ALWAYS send to BCC email (for storage)
+            if bcc_email:
+                email_sent_to_bcc = send_email(
+                    bcc_email,
+                    f"Battery Health Certificate - {data.get('registration')}",
+                    email_body,
+                    output_path
+                )
+            
+            # Optionally send to recipient email (if provided and different from BCC)
+            if recipient_email and recipient_email.lower() != bcc_email.lower():
+                email_sent_to_recipient = send_email(
+                    recipient_email,
+                    f"Battery Health Certificate - {data.get('registration')}",
+                    email_body,
+                    output_path
+                )
         
         print(f"✅ Certificate generated by '{request.user_id}': {filename}")
         if cloudinary_url:
             print(f"   📤 Cloudinary URL: {cloudinary_url}")
-        if email_sent:
-            print(f"   ✉️ Email sent to: {recipient_email}")
+        if email_sent_to_bcc:
+            print(f"   ✉️ Email sent to BCC: {bcc_email}")
+        if email_sent_to_recipient:
+            print(f"   ✉️ Email sent to recipient: {recipient_email}")
         
         return send_file(
             output_path,
@@ -874,7 +855,7 @@ def batch_generate():
                 
                 cert_id = str(uuid.uuid4())
                 registration = cert_data.get('registration', '').strip().upper().replace(' ', '')
-                filename = f"Certificate_{registration}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                filename = f"{registration}.pdf"
                 output_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 
                 temp_pdf = output_path + '.temp'
@@ -893,9 +874,11 @@ def batch_generate():
                 else:
                     os.rename(temp_pdf, output_path)
                 
-                # Send email
+                # Email logic: ALWAYS send to BCC, optionally send to recipient
                 recipient_email = cert_data.get('recipient_email', '').strip()
-                if recipient_email and os.getenv('EMAIL_SENDER'):
+                bcc_email = os.getenv('EMAIL_BCC', '').strip()
+                
+                if os.getenv('EMAIL_SENDER'):
                     email_body = f"""
                     <p>Please find attached your Battery Health Certificate.</p>
                     <p><strong>Vehicle:</strong> {cert_data.get('make')} {cert_data.get('model')}<br>
@@ -905,12 +888,23 @@ def batch_generate():
                     if cloudinary_url:
                         email_body += f'<p><a href="{cloudinary_url}">View Online</a></p>'
                     
-                    send_email(
-                        recipient_email,
-                        f"Battery Health Certificate - {cert_data.get('registration')}",
-                        email_body,
-                        output_path
-                    )
+                    # ALWAYS send to BCC
+                    if bcc_email:
+                        send_email(
+                            bcc_email,
+                            f"Battery Health Certificate - {cert_data.get('registration')}",
+                            email_body,
+                            output_path
+                        )
+                    
+                    # Optionally send to recipient (if provided and different)
+                    if recipient_email and recipient_email.lower() != bcc_email.lower():
+                        send_email(
+                            recipient_email,
+                            f"Battery Health Certificate - {cert_data.get('registration')}",
+                            email_body,
+                            output_path
+                        )
                 
                 results['successful'] += 1
                 results['files'].append(filename)
@@ -931,6 +925,8 @@ def batch_generate():
             'success': False,
             'error': str(e)
         }), 500
+
+
 
 
 @app.route('/api/extract-pdf', methods=['POST'])
@@ -968,7 +964,7 @@ def extract_pdf():
         print(f"📤 Receiving PDF: {file.filename}")
         file.save(temp_path)
         
-        # Check file size (should be under MAX_CONTENT_LENGTH)
+        # Check file size
         file_size = os.path.getsize(temp_path)
         print(f"📏 File size: {file_size / 1024:.2f} KB")
         
@@ -984,6 +980,8 @@ def extract_pdf():
         
         if extracted_data:
             print(f"✅ Successfully extracted data from {file.filename}")
+            # Add source_pdf field to track where data came from
+            extracted_data['source_pdf'] = file.filename
             return jsonify({
                 'success': True,
                 'data': extracted_data,
@@ -1009,7 +1007,7 @@ def extract_pdf():
         
         return jsonify({
             'success': False,
-            'error': f'Error processing PDF: {str(e)}'
+            'error': f'Failed to extract data from PDF: {str(e)}'
         }), 500
 
 

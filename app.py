@@ -274,17 +274,21 @@ def send_email(recipient, subject, body, attachment_path=None):
                                          filename=os.path.basename(attachment_path))
                 msg.attach(pdf_attachment)
         
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls()
+        # Use SMTP_SSL for port 465 (implicit SSL/TLS)
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as server:
             server.login(sender, password)
             recipients = [recipient]
             if bcc:
                 recipients.append(bcc)
             server.send_message(msg, from_addr=sender, to_addrs=recipients)
         
+        print(f"✅ Email sent successfully to {recipient}")
         return True
+        
     except Exception as e:
-        print(f"Email error: {e}")
+        print(f"❌ Email error: {e}")
+        import traceback
+        print(traceback.format_exc())
         return False
 
 

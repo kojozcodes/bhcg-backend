@@ -3,28 +3,21 @@ Battery Health Certificate Generator - Mobile Backend
 Flask API with Authentication, PDF generation, Cloudinary upload, and Email delivery
 """
 
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import os
 import tempfile
 import base64
 import uuid
-from datetime import datetime, timedelta, timezone
-from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
+import hashlib
+import secrets
 import jwt
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib import colors
-import cloudinary
-import cloudinary.uploader
-from PyPDF2 import PdfReader
-import io
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-import smtplib
+from datetime import datetime, timedelta
+from io import BytesIO
+from PIL import Image
+import traceback
+import PyPDF2
+import re
 
 # PDF generation
 from reportlab.lib.pagesizes import A4

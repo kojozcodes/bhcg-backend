@@ -310,6 +310,7 @@ def send_email(recipient, subject, body, attachment_path=None):
                 print(f"⚠️ Warning: Could not attach PDF: {e}")
         
         # Send the email
+        print("ENV BREVO_API_KEY =", os.getenv("BREVO_API_KEY"))
         print(f"📧 Sending email to {recipient} via Brevo...")
         api_response = api_instance.send_transac_email(send_smtp_email)
         print(f"✅ Email sent successfully via Brevo!")

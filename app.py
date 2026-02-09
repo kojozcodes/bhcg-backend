@@ -273,17 +273,54 @@ def send_email(recipient, subject, body, attachment_path=None):
                                          filename=os.path.basename(attachment_path))
                 msg.attach(pdf_attachment)
         
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls()
-            server.login(sender, password)
-            recipients = [recipient]
-            if bcc:
-                recipients.append(bcc)
-            server.send_message(msg, from_addr=sender, to_addrs=recipients)
+        # Get SMTP configuration from environment (default to port 465 for better compatibility)
+        smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+        smtp_port = int(os.getenv('SMTP_PORT', '465'))
+        
+        # Try sending with configured port
+        try:
+            if smtp_port == 465:
+                # Use SMTP_SSL for port 465 (implicit SSL)
+                print(f"📧 Attempting email via {smtp_host}:{smtp_port} (SSL)...")
+                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as server:
+                    server.login(sender, password)
+                    recipients = [recipient]
+                    if bcc:
+                        recipients.append(bcc)
+                    server.send_message(msg, from_addr=sender, to_addrs=recipients)
+                print(f"✉️ Email sent successfully via port {smtp_port}")
+            else:
+                # Use SMTP with STARTTLS for port 587
+                print(f"📧 Attempting email via {smtp_host}:{smtp_port} (STARTTLS)...")
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                    server.starttls()
+                    server.login(sender, password)
+                    recipients = [recipient]
+                    if bcc:
+                        recipients.append(bcc)
+                    server.send_message(msg, from_addr=sender, to_addrs=recipients)
+                print(f"✉️ Email sent successfully via port {smtp_port}")
+                
+        except Exception as port_error:
+            # If configured port fails and it was 587, try fallback to 465
+            if smtp_port == 587:
+                print(f"⚠️ Port 587 blocked/failed, trying fallback to port 465 (SSL)...")
+                try:
+                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=10) as server:
+                        server.login(sender, password)
+                        recipients = [recipient]
+                        if bcc:
+                            recipients.append(bcc)
+                        server.send_message(msg, from_addr=sender, to_addrs=recipients)
+                    print(f"✉️ Email sent successfully via fallback port 465")
+                except Exception as fallback_error:
+                    raise Exception(f"Both ports failed. 587: {str(port_error)[:100]}, 465: {str(fallback_error)[:100]}")
+            else:
+                raise port_error
         
         return True
     except Exception as e:
-        print(f"Email error: {e}")
+        print(f"❌ Email error: {e}")
         return False
 
 

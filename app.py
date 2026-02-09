@@ -3,21 +3,28 @@ Battery Health Certificate Generator - Mobile Backend
 Flask API with Authentication, PDF generation, Cloudinary upload, and Email delivery
 """
 
-from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
 import os
 import tempfile
 import base64
 import uuid
-import hashlib
-import secrets
+from datetime import datetime, timedelta, timezone
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import jwt
-from datetime import datetime, timedelta
-from io import BytesIO
-from PIL import Image
-import traceback
-import PyPDF2
-import re
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib import colors
+import cloudinary
+import cloudinary.uploader
+from PyPDF2 import PdfReader
+import io
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+import smtplib
 
 # PDF generation
 from reportlab.lib.pagesizes import A4
@@ -228,29 +235,44 @@ def upload_to_cloudinary(pdf_path, cert_id):
 
 
 def send_email(recipient, subject, body, attachment_path=None):
-    """Send email with optional PDF attachment"""
-    sender = os.getenv('EMAIL_SENDER')
-    password = os.getenv('EMAIL_PASSWORD')
-    bcc = os.getenv('EMAIL_BCC', '')
-    
-    if not all([sender, password]):
-        print("Email not configured")
-        return False
+    """Send email via Brevo (Sendinblue) API with optional PDF attachment"""
     
     try:
-        msg = MIMEMultipart()
-        msg['From'] = sender
-        msg['To'] = recipient
-        msg['Subject'] = subject
+        import sib_api_v3_sdk
+        from sib_api_v3_sdk.rest import ApiException
+        import base64
         
-        if bcc:
-            msg['Bcc'] = bcc
+        # Get API key from environment
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("❌ BREVO_API_KEY not configured in environment variables")
+            return False
         
-        html_body = f"""
+        # Configure Brevo API client
+        configuration = sib_api_v3_sdk.Configuration()
+        configuration.api_key['api-key'] = api_key
+        
+        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
+            sib_api_v3_sdk.ApiClient(configuration)
+        )
+        
+        # Get sender email from environment
+        sender_email = os.getenv('EMAIL_SENDER', 'evcertificate@ottocar.co.uk')
+        sender = {
+            "email": sender_email,
+            "name": "Otto Car EV Certificates"
+        }
+        
+        # Recipient
+        to = [{"email": recipient}]
+        
+        # HTML email body
+        html_content = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <img src="https://ottocar.co.uk/logo.png" alt="Otto Car" style="max-width: 150px; margin-bottom: 20px;">
+                <img src="https://ottocar.co.uk/logo.png" alt="Otto Car" 
+                     style="max-width: 150px; margin-bottom: 20px;">
                 <h2 style="color: #52C41A;">Battery Health Certificate</h2>
                 {body}
                 <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
@@ -264,63 +286,55 @@ def send_email(recipient, subject, body, attachment_path=None):
         </html>
         """
         
-        msg.attach(MIMEText(html_body, 'html'))
+        # Create email message
+        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+            to=to,
+            sender=sender,
+            subject=subject,
+            html_content=html_content
+        )
         
+        # Add BCC if configured
+        bcc_email = os.getenv('EMAIL_BCC')
+        if bcc_email:
+            send_smtp_email.bcc = [{"email": bcc_email}]
+            print(f"📧 Adding BCC: {bcc_email}")
+        
+        # Add PDF attachment if provided
         if attachment_path and os.path.exists(attachment_path):
-            with open(attachment_path, 'rb') as f:
-                pdf_attachment = MIMEApplication(f.read(), _subtype='pdf')
-                pdf_attachment.add_header('Content-Disposition', 'attachment', 
-                                         filename=os.path.basename(attachment_path))
-                msg.attach(pdf_attachment)
-        
-        # Get SMTP configuration from environment (default to port 465 for better compatibility)
-        smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-        smtp_port = int(os.getenv('SMTP_PORT', '465'))
-        
-        # Try sending with configured port
-        try:
-            if smtp_port == 465:
-                # Use SMTP_SSL for port 465 (implicit SSL)
-                print(f"📧 Attempting email via {smtp_host}:{smtp_port} (SSL)...")
-                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as server:
-                    server.login(sender, password)
-                    recipients = [recipient]
-                    if bcc:
-                        recipients.append(bcc)
-                    server.send_message(msg, from_addr=sender, to_addrs=recipients)
-                print(f"✉️ Email sent successfully via port {smtp_port}")
-            else:
-                # Use SMTP with STARTTLS for port 587
-                print(f"📧 Attempting email via {smtp_host}:{smtp_port} (STARTTLS)...")
-                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-                    server.starttls()
-                    server.login(sender, password)
-                    recipients = [recipient]
-                    if bcc:
-                        recipients.append(bcc)
-                    server.send_message(msg, from_addr=sender, to_addrs=recipients)
-                print(f"✉️ Email sent successfully via port {smtp_port}")
+            try:
+                with open(attachment_path, 'rb') as f:
+                    pdf_data = f.read()
+                    encoded_pdf = base64.b64encode(pdf_data).decode()
                 
-        except Exception as port_error:
-            # If configured port fails and it was 587, try fallback to 465
-            if smtp_port == 587:
-                print(f"⚠️ Port 587 blocked/failed, trying fallback to port 465 (SSL)...")
-                try:
-                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=10) as server:
-                        server.login(sender, password)
-                        recipients = [recipient]
-                        if bcc:
-                            recipients.append(bcc)
-                        server.send_message(msg, from_addr=sender, to_addrs=recipients)
-                    print(f"✉️ Email sent successfully via fallback port 465")
-                except Exception as fallback_error:
-                    raise Exception(f"Both ports failed. 587: {str(port_error)[:100]}, 465: {str(fallback_error)[:100]}")
-            else:
-                raise port_error
+                attachment = sib_api_v3_sdk.SendSmtpEmailAttachment(
+                    content=encoded_pdf,
+                    name=os.path.basename(attachment_path)
+                )
+                send_smtp_email.attachment = [attachment]
+                print(f"📎 PDF attachment added: {os.path.basename(attachment_path)}")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not attach PDF: {e}")
+        
+        # Send the email
+        print(f"📧 Sending email to {recipient} via Brevo...")
+        api_response = api_instance.send_transac_email(send_smtp_email)
+        print(f"✅ Email sent successfully via Brevo!")
+        print(f"   Message ID: {api_response.message_id}")
+        print(f"   Recipient: {recipient}")
         
         return True
+        
+    except ApiException as e:
+        print(f"❌ Brevo API error: {e}")
+        print(f"   Status code: {e.status if hasattr(e, 'status') else 'unknown'}")
+        print(f"   Reason: {e.reason if hasattr(e, 'reason') else 'unknown'}")
+        return False
+        
     except Exception as e:
-        print(f"❌ Email error: {e}")
+        print(f"❌ Unexpected email error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 

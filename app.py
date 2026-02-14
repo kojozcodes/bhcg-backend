@@ -9,7 +9,7 @@ import os
 import tempfile
 import base64
 import uuid
-import hashlib
+import bcrypt
 import secrets
 import jwt
 from datetime import datetime, timedelta
@@ -18,6 +18,7 @@ from PIL import Image
 import traceback
 import PyPDF2
 import re
+from functools import wraps
 
 # PDF generation
 from reportlab.lib.pagesizes import A4
@@ -98,14 +99,9 @@ except ImportError:
 # AUTHENTICATION
 # ============================================================================
 
-def hash_password(password):
-    """Hash password using SHA-256"""
-    return hashlib.sha256(password.encode()).hexdigest()
-
-
 def verify_password(password, password_hash):
-    """Verify password against hash"""
-    return hash_password(password) == password_hash
+    """Verify password against bcrypt hash"""
+    return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
 def generate_token(user_id='admin'):
@@ -132,6 +128,7 @@ def verify_token(token):
 
 def require_auth(f):
     """Decorator to require authentication"""
+    @wraps(f)
     def decorated_function(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
         
@@ -151,7 +148,6 @@ def require_auth(f):
         
         return f(*args, **kwargs)
     
-    decorated_function.__name__ = f.__name__
     return decorated_function
 
 
@@ -786,7 +782,7 @@ def validate_certificate():
     except Exception as e:
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Validation failed'
         }), 500
 
 
@@ -894,7 +890,7 @@ def generate_certificate():
         print(traceback.format_exc())
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Certificate generation failed'
         }), 500
 
 
@@ -990,7 +986,7 @@ def batch_generate():
             except Exception as e:
                 print(f"Failed certificate {idx + 1}: {e}")
                 results['failed'] += 1
-                results['errors'].append(f"Certificate {idx + 1}: {str(e)}")
+                results['errors'].append(f"Certificate {idx + 1}: Generation failed")
         
         return jsonify({
             'success': True,
@@ -1001,7 +997,7 @@ def batch_generate():
         print(f"Batch generation error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Batch generation failed'
         }), 500
 
 
@@ -1081,7 +1077,7 @@ def extract_pdf():
         
         return jsonify({
             'success': False,
-            'error': f'Error processing PDF: {str(e)}'
+            'error': 'Error processing PDF'
         }), 500
 
 

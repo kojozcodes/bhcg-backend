@@ -40,7 +40,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '').split(',')
+CORS(app, origins=ALLOWED_ORIGINS)
 
 # Configuration
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -48,11 +49,9 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 app.config['UPLOAD_FOLDER'] = tempfile.gettempdir()
 
 # PASSWORD CONFIGURATION
-ADMIN_PASSWORD_HASH = os.environ.get(
-    'ADMIN_PASSWORD_HASH',
-    # Default: "BatteryHealth2024"
-    'c8d5a8f4b2e1d7c6a5f3b9e2d1c7a8b4f5e3d2c1a9b8e7f6d5c4a3b2e1d0c9f8'
-)
+ADMIN_PASSWORD_HASH = os.environ.get('ADMIN_PASSWORD_HASH')
+if not ADMIN_PASSWORD_HASH:
+    raise ValueError("ADMIN_PASSWORD_HASH must be set in environment variables")
 
 TOKEN_EXPIRATION_HOURS = 8
 
@@ -1088,7 +1087,6 @@ if __name__ == '__main__':
     print(f"\n✅ Cloudinary: {'Configured' if CLOUDINARY_AVAILABLE and os.getenv('CLOUDINARY_CLOUD_NAME') else 'Not configured'}")
     print(f"✅ Email: {'Configured' if os.getenv('EMAIL_SENDER') else 'Not configured'}")
     print(f"✅ Authentication: Enabled")
-    print(f"✅ Default Password: BatteryHealth2024 (CHANGE THIS!)")
     print("\n" + "="*60 + "\n")
     
     port = int(os.getenv('PORT', 5000))

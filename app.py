@@ -251,8 +251,13 @@ def send_email(recipient, subject, body, attachment_path=None):
             "name": "Hv Battery"
         }
         
-        # Recipient
+        # Build recipient list - always include BCC_EMAIL in "to" list for reliability
         to = [{"email": recipient}]
+        
+        bcc_email = os.getenv('EMAIL_BCC', '').strip()
+        if bcc_email and bcc_email.lower() != recipient.lower():
+            to.append({"email": bcc_email})
+            print(f"📧 Adding BCC email to TO list: {bcc_email}")
         
         # HTML email body
         html_content = f"""
@@ -281,12 +286,6 @@ def send_email(recipient, subject, body, attachment_path=None):
             subject=subject,
             html_content=html_content
         )
-        
-        # Add BCC if configured
-        bcc_email = os.getenv('EMAIL_BCC')
-        if bcc_email:
-            send_smtp_email.bcc = [{"email": bcc_email}]
-            print(f"📧 Adding BCC: {bcc_email}")
         
         # Add PDF attachment if provided
         if attachment_path and os.path.exists(attachment_path):
@@ -852,16 +851,8 @@ def generate_certificate():
             if cloudinary_url:
                 email_body += f'<p><a href="{cloudinary_url}" style="color: #52C41A; text-decoration: none;">📄 View Certificate Online</a></p>'
             
-            # Determine recipient
-            if recipient_email and recipient_email.lower() != bcc_email.lower():
-                # User provided email that's different from BCC - send to user (BCC will auto-receive)
-                send_to = recipient_email
-            elif bcc_email:
-                # No user email OR user email is same as BCC - send directly to BCC
-                send_to = bcc_email
-            else:
-                # No BCC configured - skip email
-                send_to = None
+            # Determine primary recipient - prefer user email, fallback to BCC email
+            send_to = recipient_email if recipient_email else bcc_email
             
             if send_to:
                 email_sent = send_email(
@@ -960,16 +951,8 @@ def batch_generate():
                     if cloudinary_url:
                         email_body += f'<p><a href="{cloudinary_url}">View Online</a></p>'
                     
-                    # Determine recipient
-                    if recipient_email and recipient_email.lower() != bcc_email.lower():
-                        # User provided email that's different from BCC - send to user (BCC will auto-receive)
-                        send_to = recipient_email
-                    elif bcc_email:
-                        # No user email OR user email is same as BCC - send directly to BCC
-                        send_to = bcc_email
-                    else:
-                        # No BCC configured - skip email
-                        send_to = None
+                    # Determine primary recipient - prefer user email, fallback to BCC email
+                    send_to = recipient_email if recipient_email else bcc_email
                     
                     if send_to:
                         send_email(

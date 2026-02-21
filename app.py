@@ -223,48 +223,38 @@ def upload_to_cloudinary(pdf_path, cert_id):
 
 
 def send_email(recipient, subject, body, attachment_path=None):
-    """Send email via Brevo (Sendinblue) API with optional PDF attachment"""
+    """Send email via Gmail SMTP with optional PDF attachment.
+    
+    Always ensures evcertificate@ottocar.co.uk receives the email:
+    - If recipient IS that address, sends only to them.
+    - If recipient is someone else, sends to that person AND BCCs evcertificate@ottocar.co.uk.
+    """
     
     try:
-        import sib_api_v3_sdk
-        from sib_api_v3_sdk.rest import ApiException
-        import base64
-        
-        # Get API key from environment
-        api_key = os.getenv('BREVO_API_KEY')
-        if not api_key:
-            print("❌ BREVO_API_KEY not configured in environment variables")
+        smtp_user     = os.getenv('EMAIL_SENDER')
+        smtp_password = os.getenv('EMAIL_PASSWORD')
+        bcc_email     = os.getenv('EMAIL_BCC', 'evcertificate@ottocar.co.uk').strip()
+
+        if not smtp_user or not smtp_password:
+            print("❌ EMAIL_SENDER or EMAIL_PASSWORD not configured in environment variables")
             return False
-        
-        # Configure Brevo API client
-        configuration = sib_api_v3_sdk.Configuration()
-        configuration.api_key['api-key'] = api_key
-        
-        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
-            sib_api_v3_sdk.ApiClient(configuration)
-        )
-        
-        # Get sender email from environment
-        sender_email = os.getenv('EMAIL_SENDER', 'evcertificate@ottocar.co.uk')
-        sender = {
-            "email": sender_email,
-            "name": "Hv Battery"
-        }
-        
-        # Build recipient list - always include BCC_EMAIL in "to" list for reliability
-        to = [{"email": recipient}]
-        
-        bcc_email = os.getenv('EMAIL_BCC', '').strip()
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = f"Hv Battery <{smtp_user}>"
+        msg['To']      = recipient
+
+        recipients = [recipient]
         if bcc_email and bcc_email.lower() != recipient.lower():
-            to.append({"email": bcc_email})
-            print(f"📧 Adding BCC email to TO list: {bcc_email}")
-        
-        # HTML email body
+            msg['Bcc'] = bcc_email
+            recipients.append(bcc_email)
+            print(f"📧 BCC set to: {bcc_email}")
+
         html_content = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <img src="https://ottocar.co.uk/logo.png" alt="Otto Car" 
+                <img src="https://ottocar.co.uk/logo.png" alt="Otto Car"
                      style="max-width: 150px; margin-bottom: 20px;">
                 <h2 style="color: #52C41A;">Battery Health Certificate</h2>
                 {body}
@@ -278,55 +268,41 @@ def send_email(recipient, subject, body, attachment_path=None):
         </body>
         </html>
         """
-        
-        # Create email message
-        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
-            to=to,
-            sender=sender,
-            subject=subject,
-            html_content=html_content
-        )
-        
-        # Add PDF attachment if provided
+        msg.attach(MIMEText(html_content, 'html'))
+
         if attachment_path and os.path.exists(attachment_path):
             try:
                 with open(attachment_path, 'rb') as f:
-                    pdf_data = f.read()
-                    encoded_pdf = base64.b64encode(pdf_data).decode()
-                
-                attachment = sib_api_v3_sdk.SendSmtpEmailAttachment(
-                    content=encoded_pdf,
-                    name=os.path.basename(attachment_path)
-                )
-                send_smtp_email.attachment = [attachment]
+                    part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
+                part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
+                msg.attach(part)
                 print(f"📎 PDF attachment added: {os.path.basename(attachment_path)}")
             except Exception as e:
                 print(f"⚠️ Warning: Could not attach PDF: {e}")
-        
-        # Send the email
-        print(f"📧 Sending email via Brevo...")
-        print(f"   FROM: {sender_email}")
-        print(f"   TO list: {[t['email'] for t in to]}")
-        print(f"   Subject: {subject}")
-        api_response = api_instance.send_transac_email(send_smtp_email)
-        print(f"✅ Email sent successfully via Brevo!")
-        print(f"   Message ID: {api_response.message_id}")
-        print(f"   Recipient: {recipient}")
-        
+
+        print(f"📧 Sending email to {recipients} via Gmail SMTP (port 587)...")
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, recipients, msg.as_string())
+
+        print(f"✅ Email sent successfully via Gmail SMTP!")
+        print(f"   Recipients: {recipients}")
         return True
-        
-    except ApiException as e:
-        print(f"❌ Brevo API error: {e}")
-        print(f"   Status code: {e.status if hasattr(e, 'status') else 'unknown'}")
-        print(f"   Reason: {e.reason if hasattr(e, 'reason') else 'unknown'}")
+
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"❌ Gmail SMTP authentication failed: {e}")
+        print("   Use a Gmail App Password, not your account password.")
+        print("   Generate one at: https://myaccount.google.com/apppasswords")
         return False
-        
+
     except Exception as e:
         print(f"❌ Unexpected email error: {e}")
         import traceback
         traceback.print_exc()
         return False
-
 
 def extract_from_filename(filename):
     """Extract data from filename - works for any car brand"""
@@ -869,9 +845,7 @@ def generate_certificate():
         if cloudinary_url:
             print(f"   📤 Cloudinary URL: {cloudinary_url}")
         if email_sent:
-            print(f"   ✉️ Email sent to: {send_to}")
-            if recipient_email and bcc_email and recipient_email.lower() != bcc_email.lower():
-                print(f"   ✉️ BCC also sent to: {bcc_email}")
+            print(f"   ✉️ Email sent to: {recipient_email}")
         
         return send_file(
             output_path,
@@ -1067,206 +1041,7 @@ def extract_pdf():
             'error': 'Error processing PDF'
         }), 500
 
-# ============================================================================
-# DIAGNOSTIC ENDPOINTS (for debugging email delivery)
-# ============================================================================
 
-@app.route('/api/debug/email-config', methods=['GET'])
-@require_auth
-def debug_email_config():
-    """Show current email configuration (no secrets exposed)"""
-    return jsonify({
-        'success': True,
-        'config': {
-            'EMAIL_SENDER': os.getenv('EMAIL_SENDER', 'NOT SET'),
-            'EMAIL_BCC': os.getenv('EMAIL_BCC', 'NOT SET'),
-            'BREVO_API_KEY_SET': bool(os.getenv('BREVO_API_KEY')),
-            'BREVO_API_KEY_PREVIEW': os.getenv('BREVO_API_KEY', '')[:8] + '...' if os.getenv('BREVO_API_KEY') else 'NOT SET',
-        }
-    })
-
-
-@app.route('/api/debug/email-test', methods=['POST'])
-@require_auth
-def debug_email_test():
-    """Send a test email and return the full Brevo API response"""
-    import sib_api_v3_sdk
-    from sib_api_v3_sdk.rest import ApiException
-
-    try:
-        test_email = request.json.get('email', '').strip()
-        if not test_email:
-            return jsonify({'success': False, 'error': 'Provide an email address'}), 400
-
-        api_key = os.getenv('BREVO_API_KEY')
-        if not api_key:
-            return jsonify({'success': False, 'error': 'BREVO_API_KEY not set'}), 500
-
-        configuration = sib_api_v3_sdk.Configuration()
-        configuration.api_key['api-key'] = api_key
-        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
-            sib_api_v3_sdk.ApiClient(configuration)
-        )
-
-        sender_email = os.getenv('EMAIL_SENDER', 'hvbattery7444@gmail.com')
-
-        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
-            to=[{"email": test_email}],
-            sender={"email": sender_email, "name": "HV Battery Debug"},
-            subject="[DEBUG TEST] Battery Health Email Test - {}".format(datetime.utcnow().strftime('%H:%M:%S')),
-            html_content="<h2>Email Delivery Test</h2><p>This is a diagnostic test email.</p><p><strong>Sent at:</strong> {} UTC</p><p><strong>From:</strong> {}</p><p><strong>To:</strong> {}</p><p>If you receive this, email delivery to this address is working.</p>".format(datetime.utcnow().isoformat(), sender_email, test_email)
-        )
-
-        api_response = api_instance.send_transac_email(send_smtp_email)
-
-        return jsonify({
-            'success': True,
-            'message': 'Test email accepted by Brevo',
-            'message_id': api_response.message_id,
-            'sent_to': test_email,
-            'sent_from': sender_email,
-            'timestamp': datetime.utcnow().isoformat(),
-            'next_step': 'Use /api/debug/email-events to check delivery status in ~30 seconds'
-        })
-
-    except ApiException as e:
-        return jsonify({
-            'success': False,
-            'error': 'Brevo API error: {} - {}'.format(e.status, e.reason),
-            'body': str(e.body) if hasattr(e, 'body') else None
-        }), 500
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/debug/email-events', methods=['GET'])
-@require_auth
-def debug_email_events():
-    """Check Brevo event logs for recent emails - shows delivered, bounced, blocked, etc."""
-    import sib_api_v3_sdk
-    from sib_api_v3_sdk.rest import ApiException
-
-    try:
-        api_key = os.getenv('BREVO_API_KEY')
-        if not api_key:
-            return jsonify({'success': False, 'error': 'BREVO_API_KEY not set'}), 500
-
-        configuration = sib_api_v3_sdk.Configuration()
-        configuration.api_key['api-key'] = api_key
-        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
-            sib_api_v3_sdk.ApiClient(configuration)
-        )
-
-        filter_email = request.args.get('email', '')
-        filter_message_id = request.args.get('message_id', '')
-
-        kwargs = {
-            'limit': 20,
-            'sort': 'desc'
-        }
-        if filter_email:
-            kwargs['email'] = filter_email
-        if filter_message_id:
-            kwargs['message_id'] = filter_message_id
-
-        api_response = api_instance.get_transac_emails_list(**kwargs)
-
-        events = []
-        if api_response and hasattr(api_response, 'transactional_emails'):
-            for email_event in api_response.transactional_emails:
-                event_data = {
-                    'email': email_event.email if hasattr(email_event, 'email') else 'N/A',
-                    'subject': email_event.subject if hasattr(email_event, 'subject') else 'N/A',
-                    'message_id': email_event.message_id if hasattr(email_event, 'message_id') else 'N/A',
-                    'date': str(email_event.date) if hasattr(email_event, 'date') else 'N/A',
-                    'uuid': email_event.uuid if hasattr(email_event, 'uuid') else 'N/A',
-                }
-                events.append(event_data)
-
-        return jsonify({
-            'success': True,
-            'total_events': len(events),
-            'filter_email': filter_email or 'none (showing all)',
-            'filter_message_id': filter_message_id or 'none',
-            'events': events,
-            'help': 'Use ?email=evcertificate@ottocar.co.uk to filter. Get uuid and use /api/debug/email-event-detail?uuid=... for delivery status.'
-        })
-
-    except ApiException as e:
-        return jsonify({
-            'success': False,
-            'error': 'Brevo API error: {} - {}'.format(e.status, e.reason),
-            'body': str(e.body) if hasattr(e, 'body') else None
-        }), 500
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/debug/email-event-detail', methods=['GET'])
-@require_auth
-def debug_email_event_detail():
-    """Get detailed delivery events for a specific email UUID from Brevo"""
-    import sib_api_v3_sdk
-    from sib_api_v3_sdk.rest import ApiException
-
-    try:
-        email_uuid = request.args.get('uuid', '')
-        if not email_uuid:
-            return jsonify({'success': False, 'error': 'Provide ?uuid=<email_uuid> from the events list'}), 400
-
-        api_key = os.getenv('BREVO_API_KEY')
-        if not api_key:
-            return jsonify({'success': False, 'error': 'BREVO_API_KEY not set'}), 500
-
-        configuration = sib_api_v3_sdk.Configuration()
-        configuration.api_key['api-key'] = api_key
-        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
-            sib_api_v3_sdk.ApiClient(configuration)
-        )
-
-        api_response = api_instance.get_transac_email_content(email_uuid)
-
-        result = {}
-        for attr in ['email', 'subject', 'date', 'message_id', 'uuid', 'events', 'body']:
-            if hasattr(api_response, attr):
-                val = getattr(api_response, attr)
-                if attr == 'events':
-                    result[attr] = [
-                        {
-                            'name': e.name if hasattr(e, 'name') else str(e),
-                            'time': str(e.time) if hasattr(e, 'time') else 'N/A'
-                        }
-                        for e in (val or [])
-                    ]
-                elif attr == 'body':
-                    result[attr] = '(html content hidden)'
-                else:
-                    result[attr] = str(val) if val else 'N/A'
-
-        return jsonify({
-            'success': True,
-            'email_detail': result,
-            'help': 'Events show: requests, delivered, opened, hardBounces, softBounces, blocked, spam, etc.'
-        })
-
-    except ApiException as e:
-        return jsonify({
-            'success': False,
-            'error': 'Brevo API error: {} - {}'.format(e.status, e.reason),
-            'body': str(e.body) if hasattr(e, 'body') else None
-        }), 500
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-            
 if __name__ == '__main__':
     print("\n" + "="*60)
     print("🔋 BATTERY HEALTH CERTIFICATE API - STARTING")

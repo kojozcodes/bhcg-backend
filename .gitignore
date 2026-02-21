@@ -40,3 +40,5 @@ tmp/
 
 # PDF outputs (if you don't want to track generated certificates)
 *.pdf
+
+*_copy.*

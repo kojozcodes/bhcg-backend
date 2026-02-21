@@ -223,38 +223,48 @@ def upload_to_cloudinary(pdf_path, cert_id):
 
 
 def send_email(recipient, subject, body, attachment_path=None):
-    """Send email via Gmail SMTP with optional PDF attachment.
-    
-    Always ensures evcertificate@ottocar.co.uk receives the email:
-    - If recipient IS that address, sends only to them.
-    - If recipient is someone else, sends to that person AND BCCs evcertificate@ottocar.co.uk.
-    """
+    """Send email via Brevo (Sendinblue) API with optional PDF attachment"""
     
     try:
-        smtp_user     = os.getenv('EMAIL_SENDER')
-        smtp_password = os.getenv('EMAIL_PASSWORD')
-        bcc_email     = os.getenv('EMAIL_BCC', 'evcertificate@ottocar.co.uk').strip()
-
-        if not smtp_user or not smtp_password:
-            print("❌ EMAIL_SENDER or EMAIL_PASSWORD not configured in environment variables")
+        import sib_api_v3_sdk
+        from sib_api_v3_sdk.rest import ApiException
+        import base64
+        
+        # Get API key from environment
+        api_key = os.getenv('BREVO_API_KEY')
+        if not api_key:
+            print("❌ BREVO_API_KEY not configured in environment variables")
             return False
-
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From']    = f"Hv Battery <{smtp_user}>"
-        msg['To']      = recipient
-
-        recipients = [recipient]
+        
+        # Configure Brevo API client
+        configuration = sib_api_v3_sdk.Configuration()
+        configuration.api_key['api-key'] = api_key
+        
+        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
+            sib_api_v3_sdk.ApiClient(configuration)
+        )
+        
+        # Get sender email from environment
+        sender_email = os.getenv('EMAIL_SENDER', 'evcertificate@ottocar.co.uk')
+        sender = {
+            "email": sender_email,
+            "name": "Hv Battery"
+        }
+        
+        # Build recipient list - always include BCC_EMAIL in "to" list for reliability
+        to = [{"email": recipient}]
+        
+        bcc_email = os.getenv('EMAIL_BCC', '').strip()
         if bcc_email and bcc_email.lower() != recipient.lower():
-            msg['Bcc'] = bcc_email
-            recipients.append(bcc_email)
-            print(f"📧 BCC set to: {bcc_email}")
-
+            to.append({"email": bcc_email})
+            print(f"📧 Adding BCC email to TO list: {bcc_email}")
+        
+        # HTML email body
         html_content = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <img src="https://ottocar.co.uk/logo.png" alt="Otto Car"
+                <img src="https://ottocar.co.uk/logo.png" alt="Otto Car" 
                      style="max-width: 150px; margin-bottom: 20px;">
                 <h2 style="color: #52C41A;">Battery Health Certificate</h2>
                 {body}
@@ -268,39 +278,52 @@ def send_email(recipient, subject, body, attachment_path=None):
         </body>
         </html>
         """
-        msg.attach(MIMEText(html_content, 'html'))
-
+        
+        # Create email message
+        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+            to=to,
+            sender=sender,
+            subject=subject,
+            html_content=html_content
+        )
+        
+        # Add PDF attachment if provided
         if attachment_path and os.path.exists(attachment_path):
             try:
                 with open(attachment_path, 'rb') as f:
-                    part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
-                part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
-                msg.attach(part)
+                    pdf_data = f.read()
+                    encoded_pdf = base64.b64encode(pdf_data).decode()
+                
+                attachment = sib_api_v3_sdk.SendSmtpEmailAttachment(
+                    content=encoded_pdf,
+                    name=os.path.basename(attachment_path)
+                )
+                send_smtp_email.attachment = [attachment]
                 print(f"📎 PDF attachment added: {os.path.basename(attachment_path)}")
             except Exception as e:
                 print(f"⚠️ Warning: Could not attach PDF: {e}")
-
-        print(f"📧 Sending email to {recipients} via Gmail SMTP (port 465)...")
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.ehlo()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, recipients, msg.as_string())
-
-        print(f"✅ Email sent successfully via Gmail SMTP!")
-        print(f"   Recipients: {recipients}")
+        
+        # Send the email
+        print(f"📧 Sending email to {recipient} via Brevo...")
+        api_response = api_instance.send_transac_email(send_smtp_email)
+        print(f"✅ Email sent successfully via Brevo!")
+        print(f"   Message ID: {api_response.message_id}")
+        print(f"   Recipient: {recipient}")
+        
         return True
-
-    except smtplib.SMTPAuthenticationError as e:
-        print(f"❌ Gmail SMTP authentication failed: {e}")
-        print("   Use a Gmail App Password, not your account password.")
-        print("   Generate one at: https://myaccount.google.com/apppasswords")
+        
+    except ApiException as e:
+        print(f"❌ Brevo API error: {e}")
+        print(f"   Status code: {e.status if hasattr(e, 'status') else 'unknown'}")
+        print(f"   Reason: {e.reason if hasattr(e, 'reason') else 'unknown'}")
         return False
-
+        
     except Exception as e:
         print(f"❌ Unexpected email error: {e}")
         import traceback
         traceback.print_exc()
         return False
+
 
 def extract_from_filename(filename):
     """Extract data from filename - works for any car brand"""

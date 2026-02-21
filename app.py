@@ -280,10 +280,8 @@ def send_email(recipient, subject, body, attachment_path=None):
             except Exception as e:
                 print(f"⚠️ Warning: Could not attach PDF: {e}")
 
-        print(f"📧 Sending email to {recipients} via Gmail SMTP (port 587)...")
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.ehlo()
-            server.starttls()
+        print(f"📧 Sending email to {recipients} via Gmail SMTP (port 465)...")
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.ehlo()
             server.login(smtp_user, smtp_password)
             server.sendmail(smtp_user, recipients, msg.as_string())
